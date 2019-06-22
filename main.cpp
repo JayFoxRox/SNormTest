@@ -87,7 +87,7 @@ int main()
     GLuint resultsBuf;
     glGenBuffers(1, &resultsBuf);
     glBindBuffer(GL_ARRAY_BUFFER, resultsBuf);
-    glBufferStorage(GL_ARRAY_BUFFER, sizeof(GLfloat) * 256, NULL, GL_MAP_READ_BIT);
+    glBufferStorage(GL_ARRAY_BUFFER, sizeof(GLfloat) * 512, NULL, GL_MAP_READ_BIT);
     glBindBuffer(GL_ARRAY_BUFFER, 0);
 
     // Compute shader that just converts every 8-bit value into a float and stores the result in a buffer.
@@ -107,9 +107,9 @@ buffer ResultsBuffer { float Results[]; };
 layout(local_size_x = 1) in;
 void main()
 {
-    for (int i = 0; i < 256; i++)
+    for (int i = 0; i < 512; i++)
     {
-        Results[i] = texelFetch(all8bitpixels, i, 0).r;
+        Results[i] = texture(all8bitpixels, 0.5 / 256.0 + i / 512.0).r;
     }
 }
 )GLSL"
@@ -153,14 +153,14 @@ void main()
 
         // Map the buffer to be able to read its data.
         glBindBuffer(GL_ARRAY_BUFFER, resultsBuf);
-        GLfloat* results = (GLfloat*)glMapBufferRange(GL_ARRAY_BUFFER, 0, sizeof(GLfloat) * 256, GL_MAP_READ_BIT);
+        GLfloat* results = (GLfloat*)glMapBufferRange(GL_ARRAY_BUFFER, 0, sizeof(GLfloat) * 512, GL_MAP_READ_BIT);
         glBindBuffer(GL_ARRAY_BUFFER, 0);
 
         // Output the table of values
         printf("%s:\n", viewName);
         int nCols = 4;
-        int nRows = 256 / nCols;
-        assert(nCols * nRows == 256);
+        int nRows = 512 / nCols;
+        assert(nCols * nRows == 512);
         for (int row = 0; row < nRows; row++)
         {
             printf("| ");
@@ -168,13 +168,13 @@ void main()
             {
                 int i = row + col * nRows;
 
-                if (view == unormView || view == srgbView || (view == snormView && i <= 127))
+                if (view == unormView || view == srgbView || (view == snormView && i <= 255))
                 {
-                    printf("%3d -> %2.3f | ", i, results[i]);
+                    printf("%5.1f -> %2.3f | ", i / 2.0f, results[i]);
                 }
                 else
                 {
-                    printf("%3d (%4d) -> %2.3f | ", i, (signed char)i, results[i]);
+                    printf("%5.1f (%6.1f) -> %2.3f | ", i / 2.0f, i / 2.0f - 256.0f, results[i]);
                 }
             }
             printf("\n");
