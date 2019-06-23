@@ -51,21 +51,25 @@ int main()
     printf("GL_VERSION: %s\n", glGetString(GL_VERSION));
     printf("\n");
 
-    unsigned char all8bitpixels[256 * 4];
-    for (int i = 0; i < 256; i++)
+    const unsigned int width = 2;
+
+    unsigned char all8bitpixels[width * 4];
+    for (int i = 0; i < width; i++)
     {
-        all8bitpixels[i * 4 + 0] = i;
-        all8bitpixels[i * 4 + 1] = i;
-        all8bitpixels[i * 4 + 2] = i;
-        all8bitpixels[i * 4 + 3] = i;
+        int r = i / (float)(width - 1) * 0xFF;
+        all8bitpixels[i * 4 + 0] = r;
+        all8bitpixels[i * 4 + 1] = r;
+        all8bitpixels[i * 4 + 2] = r;
+        all8bitpixels[i * 4 + 3] = r;
+        printf("%d: 0x%02X (%d)\n", i, r, sizeof(all8bitpixels));
     }
 
     // Initialize the texture with raw 8-bit data in it.
     GLuint texture;
     glGenTextures(1, &texture);
     glBindTexture(GL_TEXTURE_1D, texture);
-    glTexStorage1D(GL_TEXTURE_1D, 1, GL_RGBA8UI, 256);
-    glTexSubImage1D(GL_TEXTURE_1D, 0, 0, 256, GL_RGBA_INTEGER, GL_UNSIGNED_BYTE, all8bitpixels);
+    glTexStorage1D(GL_TEXTURE_1D, 1, GL_RGBA8UI, width);
+    glTexSubImage1D(GL_TEXTURE_1D, 0, 0, width, GL_RGBA_INTEGER, GL_UNSIGNED_BYTE, all8bitpixels);
     glBindTexture(GL_TEXTURE_1D, 0);
 
     // Create a UNORM view of the 8-bit data
@@ -84,11 +88,11 @@ int main()
     glTextureView(srgbView, GL_TEXTURE_1D, texture, GL_SRGB8_ALPHA8, 0, 1, 0, 1);
 
     // Create a buffer to store the results of the test
-    unsigned int steps = 4;
+    unsigned int steps = 1 << 8; // above 256 will resolve the same pixel
     GLuint resultsBuf;
     glGenBuffers(1, &resultsBuf);
     glBindBuffer(GL_ARRAY_BUFFER, resultsBuf);
-    glBufferStorage(GL_ARRAY_BUFFER, sizeof(GLfloat) * 256 * steps, NULL, GL_MAP_READ_BIT);
+    glBufferStorage(GL_ARRAY_BUFFER, sizeof(GLfloat) * width * steps, NULL, GL_MAP_READ_BIT);
     glBindBuffer(GL_ARRAY_BUFFER, 0);
 
     // Compute shader that just converts every 8-bit value into a float and stores the result in a buffer.
@@ -102,7 +106,8 @@ R"GLSL(
 layout(binding = 0)
 uniform sampler1D all8bitpixels;
 
-uniform int steps;
+uniform uint steps;
+uniform uint width;
 
 layout(std430, binding = 0)
 buffer ResultsBuffer { float Results[]; };
@@ -110,9 +115,9 @@ buffer ResultsBuffer { float Results[]; };
 layout(local_size_x = 1) in;
 void main()
 {
-    for (int i = 0; i < 256 * steps; i++)
+    for (int i = 0; i < width * steps; i++)
     {
-        Results[i] = texture(all8bitpixels, 0.5 / 256.0 + i / (256.0 * steps)).r;
+        Results[i] = texture(all8bitpixels, 0.5 / float(width) + i / float(width * steps)).r;
     }
 }
 )GLSL"
@@ -144,7 +149,8 @@ void main()
 
         // Run the test
         glUseProgram(program);
-        glUniform1i(glGetUniformLocation(program, "steps"), steps);
+        glUniform1ui(glGetUniformLocation(program, "steps"), steps);
+        glUniform1ui(glGetUniformLocation(program, "width"), width);
         glDispatchCompute(1, 1, 1);
         glUseProgram(0);
 
@@ -157,14 +163,14 @@ void main()
 
         // Map the buffer to be able to read its data.
         glBindBuffer(GL_ARRAY_BUFFER, resultsBuf);
-        GLfloat* results = (GLfloat*)glMapBufferRange(GL_ARRAY_BUFFER, 0, sizeof(GLfloat) * 256 * steps, GL_MAP_READ_BIT);
+        GLfloat* results = (GLfloat*)glMapBufferRange(GL_ARRAY_BUFFER, 0, sizeof(GLfloat) * width * steps, GL_MAP_READ_BIT);
         glBindBuffer(GL_ARRAY_BUFFER, 0);
 
         // Output the table of values
         printf("%s:\n", viewName);
-        int nCols = 4;
-        int nRows = 256 / nCols * steps;
-        assert(nCols * nRows == 256 * steps);
+        int nCols = 2;
+        int nRows = width / nCols * steps;
+        assert(nCols * nRows == width * steps);
         for (int row = 0; row < nRows; row++)
         {
             printf("| ");
@@ -172,13 +178,13 @@ void main()
             {
                 int i = row + col * nRows;
 
-                if (view == unormView || view == srgbView || (view == snormView && i < 256/2 * steps))
+                if (view == unormView || view == srgbView || (view == snormView && i < width/2 * steps))
                 {
                     printf("%6.2f -> %6.3f | ", i / (float)steps, results[i]);
                 }
                 else
                 {
-                    printf("%6.2f (%7.2f) -> %6.3f | ", i / (float)steps, i / (float)steps - 256.0f, results[i]);
+                    printf("%6.2f (%7.2f) -> %6.3f | ", i / (float)steps, i / (float)steps - (float)width, results[i]);
                 }
             }
             printf("\n");
