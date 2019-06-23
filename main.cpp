@@ -84,10 +84,11 @@ int main()
     glTextureView(srgbView, GL_TEXTURE_1D, texture, GL_SRGB8_ALPHA8, 0, 1, 0, 1);
 
     // Create a buffer to store the results of the test
+    unsigned int steps = 4;
     GLuint resultsBuf;
     glGenBuffers(1, &resultsBuf);
     glBindBuffer(GL_ARRAY_BUFFER, resultsBuf);
-    glBufferStorage(GL_ARRAY_BUFFER, sizeof(GLfloat) * 512, NULL, GL_MAP_READ_BIT);
+    glBufferStorage(GL_ARRAY_BUFFER, sizeof(GLfloat) * 256 * steps, NULL, GL_MAP_READ_BIT);
     glBindBuffer(GL_ARRAY_BUFFER, 0);
 
     // Compute shader that just converts every 8-bit value into a float and stores the result in a buffer.
@@ -101,15 +102,17 @@ R"GLSL(
 layout(binding = 0)
 uniform sampler1D all8bitpixels;
 
+uniform int steps;
+
 layout(std430, binding = 0)
 buffer ResultsBuffer { float Results[]; };
 
 layout(local_size_x = 1) in;
 void main()
 {
-    for (int i = 0; i < 512; i++)
+    for (int i = 0; i < 256 * steps; i++)
     {
-        Results[i] = texture(all8bitpixels, 0.5 / 256.0 + i / 512.0).r;
+        Results[i] = texture(all8bitpixels, 0.5 / 256.0 + i / (256.0 * steps)).r;
     }
 }
 )GLSL"
@@ -141,6 +144,7 @@ void main()
 
         // Run the test
         glUseProgram(program);
+        glUniform1i(glGetUniformLocation(program, "steps"), steps);
         glDispatchCompute(1, 1, 1);
         glUseProgram(0);
 
@@ -153,14 +157,14 @@ void main()
 
         // Map the buffer to be able to read its data.
         glBindBuffer(GL_ARRAY_BUFFER, resultsBuf);
-        GLfloat* results = (GLfloat*)glMapBufferRange(GL_ARRAY_BUFFER, 0, sizeof(GLfloat) * 512, GL_MAP_READ_BIT);
+        GLfloat* results = (GLfloat*)glMapBufferRange(GL_ARRAY_BUFFER, 0, sizeof(GLfloat) * 256 * steps, GL_MAP_READ_BIT);
         glBindBuffer(GL_ARRAY_BUFFER, 0);
 
         // Output the table of values
         printf("%s:\n", viewName);
         int nCols = 4;
-        int nRows = 512 / nCols;
-        assert(nCols * nRows == 512);
+        int nRows = 256 / nCols * steps;
+        assert(nCols * nRows == 256 * steps);
         for (int row = 0; row < nRows; row++)
         {
             printf("| ");
@@ -168,13 +172,13 @@ void main()
             {
                 int i = row + col * nRows;
 
-                if (view == unormView || view == srgbView || (view == snormView && i <= 255))
+                if (view == unormView || view == srgbView || (view == snormView && i < 256/2 * steps))
                 {
-                    printf("%5.1f -> %2.3f | ", i / 2.0f, results[i]);
+                    printf("%6.2f -> %6.3f | ", i / (float)steps, results[i]);
                 }
                 else
                 {
-                    printf("%5.1f (%6.1f) -> %2.3f | ", i / 2.0f, i / 2.0f - 256.0f, results[i]);
+                    printf("%6.2f (%7.2f) -> %6.3f | ", i / (float)steps, i / (float)steps - 256.0f, results[i]);
                 }
             }
             printf("\n");
